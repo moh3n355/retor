@@ -1,0 +1,73 @@
+#!/bin/bash
+# retor - rotate the Tor process circuit/config in the background
+#
+# Usage:
+#   retor <seconds>   start rotating every N seconds (runs in background)
+#   retor -d          stop the background rotation
+#
+# Repo: https://github.com/<your-username>/retor
+
+PIDFILE="/tmp/.retor.pid"
+LOGFILE="/tmp/.retor.log"
+
+start() {
+    local interval="$1"
+
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "retor is already running (PID $(cat "$PIDFILE")). Run 'retor -d' first to stop it."
+        exit 1
+    fi
+
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -le 0 ]]; then
+        echo "Usage: retor <seconds>"
+        exit 1
+    fi
+
+    if ! command -v pkill >/dev/null 2>&1; then
+        echo "Error: pkill not found. Install procps (e.g. 'apt install procps')."
+        exit 1
+    fi
+
+    ( setsid bash -c '
+        while true; do
+            pkill -HUP -x tor
+            sleep "'"$interval"'"
+        done
+    ' >"$LOGFILE" 2>&1 & echo $! > "$PIDFILE" )
+
+    sleep 0.2
+    if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "retor started in background (PID $(cat "$PIDFILE")), rotating every ${interval}s."
+    else
+        echo "Failed to start retor."
+        rm -f "$PIDFILE"
+        exit 1
+    fi
+}
+
+stop() {
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        pkill -P "$(cat "$PIDFILE")" 2>/dev/null
+        kill "$(cat "$PIDFILE")" 2>/dev/null
+        rm -f "$PIDFILE"
+        echo "retor stopped."
+    else
+        echo "retor is not running."
+        rm -f "$PIDFILE"
+    fi
+}
+
+case "$1" in
+    -d)
+        stop
+        ;;
+    ''|*[!0-9]*)
+        echo "Usage:"
+        echo "  retor <seconds>   start rotating tor every N seconds (background)"
+        echo "  retor -d          stop rotation"
+        exit 1
+        ;;
+    *)
+        start "$1"
+        ;;
+esac
